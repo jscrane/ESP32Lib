@@ -190,6 +190,8 @@ class Graphics: public ImageDrawer
 			{
 				cursorX = cursorBaseX;
 				cursorY += font->charHeight;
+				if(autoScroll && cursorY + font->charHeight > yres)
+					scroll(cursorY + font->charHeight - yres, backColor);
 			}
 			else
 				print(*str);
@@ -199,7 +201,7 @@ class Graphics: public ImageDrawer
 
 	void println(const char *str)
 	{
-		print(str); 
+		print(str);
 		print("\n");
 	}
 
