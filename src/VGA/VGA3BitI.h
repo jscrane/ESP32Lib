@@ -10,58 +10,90 @@
 		http://bitluni.net
 */
 #pragma once
-#include "VGA.h"
+#include "VGAI2SEngine.h"
+//#include "../Graphics/Graphics.h"
 #include "../Graphics/GraphicsR1G1B1A1.h"
 
-class VGA3BitI : public VGA, public GraphicsR1G1B1A1
+class VGA3BitI : public VGAI2SEngine<BLpx1sz8sw2sh0>, public GraphicsR1G1B1A1 // (=) public Graphics<ColorR1G1B1A1X4, BLpx2sz8swxshx, CTBIdentity>
 {
   public:
-	VGA3BitI()	//8 bit based modes only work with I2S1
-		: VGA(1)
+	VGA3BitI() //8 bit based modes only work with I2S1
+		: VGAI2SEngine<BLpx1sz8sw2sh0>(1)
 	{
+		frontColor = 0xf;
 		interruptStaticChild = &VGA3BitI::interrupt;
 	}
 
 	bool init(const Mode &mode, const int RPin, const int GPin, const int BPin, const int hsyncPin, const int vsyncPin, const int clockPin = -1)
 	{
-		int pinMap[8] = {
+		const int bitCount = 8;
+		int pinMap[bitCount] = {
 			RPin,
 			GPin,
 			BPin,
 			-1, -1, -1,
 			hsyncPin, vsyncPin
 		};
-		return VGA::init(mode, pinMap, 8, clockPin);
+		return initdynamicwritetorenderbuffer(mode, pinMap, bitCount, clockPin);
+	}
+
+	bool init(const Mode &mode, const int *redPins, const int *greenPins, const int *bluePins, const int hsyncPin, const int vsyncPin, const int clockPin = -1, const bool mostSignigicantPinFirst = false)
+	{
+		const int bitCount = 8;
+		int pinMap[bitCount];
+		for (int i = 0; i < 8; i++)
+		{
+			pinMap[i] = -1;
+		}
+		pinMap[0] = redPins[0];
+		pinMap[1] = greenPins[0];
+		pinMap[2] = bluePins[0];
+		pinMap[6] = hsyncPin;
+		pinMap[7] = vsyncPin;
+
+		return initdynamicwritetorenderbuffer(mode, pinMap, bitCount, clockPin);
 	}
 
 	bool init(const Mode &mode, const PinConfig &pinConfig)
 	{
-		int pins[8];
-		pinConfig.fill3Bit(pins);
-		return VGA::init(mode, pins, 8, pinConfig.clock);
+		const int bitCount = 8;
+		int pinMap[bitCount];
+		pinConfig.fill3Bit(pinMap);
+		int clockPin = pinConfig.clock;
+
+		return initdynamicwritetorenderbuffer(mode, pinMap, bitCount, clockPin);
+	}
+
+	//UPPER LIMIT: THE CODE BETWEEN THESE MARKS IS SHARED BETWEEN 3BIT, 6BIT, AND 14BIT
+
+	static const int bitMaskInRenderingBufferHSync()
+	{
+		return 1<<(8*bytesPerBufferUnit()-2);
+	}
+
+	static const int bitMaskInRenderingBufferVSync()
+	{
+		return 1<<(8*bytesPerBufferUnit()-1);
+	}
+
+	bool initdynamicwritetorenderbuffer(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin = -1)
+	{
+		lineBufferCount = 3;
+		rendererBufferCount = 1;
+		return initengine(mode, pinMap, bitCount, clockPin, 1); // 1 buffer per line
 	}
 
 	virtual void initSyncBits()
 	{
-		hsyncBitI = mode.hSyncPolarity ? 0x40 : 0;
-		vsyncBitI = mode.vSyncPolarity ? 0x80 : 0;
-		hsyncBit = hsyncBitI ^ 0x40;
-		vsyncBit = vsyncBitI ^ 0x80;
+		hsyncBitI = mode.hSyncPolarity ? (bitMaskInRenderingBufferHSync()) : 0;
+		vsyncBitI = mode.vSyncPolarity ? (bitMaskInRenderingBufferVSync()) : 0;
+		hsyncBit = hsyncBitI ^ (bitMaskInRenderingBufferHSync());
+		vsyncBit = vsyncBitI ^ (bitMaskInRenderingBufferVSync());
 	}
 
 	virtual long syncBits(bool hSync, bool vSync)
 	{
-		return ((hSync ? hsyncBit : hsyncBitI) | (vSync ? vsyncBit : vsyncBitI)) * 0x1010101;
-	}
-
-	virtual int bytesPerSample() const
-	{
-		return 1;
-	}
-
-	virtual float pixelAspect() const
-	{
-		return 1;
+		return ((hSync ? hsyncBit : hsyncBitI) | (vSync ? vsyncBit : vsyncBitI)) * rendererStaticReplicate32();
 	}
 
 	virtual void propagateResolution(const int xres, const int yres)
@@ -90,51 +122,52 @@ class VGA3BitI : public VGA, public GraphicsR1G1B1A1
 
 	static void interrupt(void *arg);
 
-	static void interruptPixelLine(int y, unsigned long *pixels, unsigned long syncBits, void *arg);
+	static void interruptPixelLine(int y, uint8_t *pixels, void *arg);
 };
 
 
 void IRAM_ATTR VGA3BitI::interrupt(void *arg)
 {
 	VGA3BitI * staticthis = (VGA3BitI *)arg;
-	
-	unsigned long *signal = (unsigned long *)staticthis->dmaBufferDescriptors[staticthis->dmaBufferDescriptorActive].buffer();
-	unsigned long *pixels = &((unsigned long *)staticthis->dmaBufferDescriptors[staticthis->dmaBufferDescriptorActive].buffer())[(staticthis->mode.hSync + staticthis->mode.hBack) / 4];
-	unsigned long base, baseh;
-	if (staticthis->currentLine >= staticthis->mode.vFront && staticthis->currentLine < staticthis->mode.vFront + staticthis->mode.vSync)
-	{
-		baseh = (staticthis->hsyncBit | staticthis->vsyncBit) * 0x1010101;
-		base = (staticthis->hsyncBitI | staticthis->vsyncBit) * 0x1010101;
-	}
-	else
-	{
-		baseh = (staticthis->hsyncBit | staticthis->vsyncBitI) * 0x1010101;
-		base = (staticthis->hsyncBitI | staticthis->vsyncBitI) * 0x1010101;
-	}
-	for (int i = 0; i < staticthis->mode.hSync / 4; i++)
-		signal[i] = baseh;
-	for (int i = staticthis->mode.hSync / 4; i < (staticthis->mode.hSync + staticthis->mode.hBack) / 4; i++)
-		signal[i] = base;
 
-	int y = (staticthis->currentLine - staticthis->mode.vFront - staticthis->mode.vSync - staticthis->mode.vBack) / staticthis->mode.vDiv;
-	if (y >= 0 && y < staticthis->mode.vRes)
-		staticthis->interruptPixelLine(y, pixels, base, arg);
-	else
-		for (int i = 0; i < staticthis->mode.hRes / 4; i++)
-		{
-			pixels[i] = base;
-		}
-	for (int i = 0; i < staticthis->mode.hFront / 4; i++)
-		signal[i + (staticthis->mode.hSync + staticthis->mode.hBack + staticthis->mode.hRes) / 4] = base;
-	staticthis->currentLine = (staticthis->currentLine + 1) % staticthis->totalLines;
-	staticthis->dmaBufferDescriptorActive = (staticthis->dmaBufferDescriptorActive + 1) % staticthis->dmaBufferDescriptorCount;
-	if (staticthis->currentLine == 0)
+	//obtain currently rendered line from the buffer just read, based on the conventioned ordering and buffers per line
+	staticthis->currentLine = staticthis->dmaBufferDescriptorActive >> ( (staticthis->descriptorsPerLine==2) ? 1 : 0 );
+
+	//in the case of two buffers per line,
+	//render only when the sync half of the line ended (longer period until next interrupt)
+	//else exit early
+	//This might need to be revised, because it might be better to overlap and miss the second interrupt
+	if ( (staticthis->descriptorsPerLine==2) && ((staticthis->dmaBufferDescriptorActive & 1) != 0) ) return;
+
+	//TO DO: This should be precalculated outside the interrupt
+	int vInactiveLinesCount = staticthis->mode.vFront + staticthis->mode.vSync + staticthis->mode.vBack;
+
+	//render ahead (the lenght of buffered lines)
+	int renderLine = (staticthis->currentLine + staticthis->lineBufferCount);
+	if (renderLine >= staticthis->totalLines) renderLine -= staticthis->totalLines;
+
+	if (renderLine >= vInactiveLinesCount)
+	{
+		int renderActiveLine = renderLine - vInactiveLinesCount;
+		uint8_t *activeRenderingBuffer = ((uint8_t *)
+		staticthis->dmaBufferDescriptors[staticthis->indexRendererDataBuffer[0] + renderActiveLine * staticthis->descriptorsPerLine + staticthis->descriptorsPerLine - 1].buffer() + staticthis->dataOffsetInLineInBytes
+		);
+
+		int y = renderActiveLine / staticthis->mode.vDiv;
+		if (y >= 0 && y < staticthis->yres)
+			staticthis->interruptPixelLine(y, activeRenderingBuffer, arg);
+	}
+
+	if (renderLine == 0)
 		staticthis->vSyncPassed = true;
 }
 
-void IRAM_ATTR VGA3BitI::interruptPixelLine(int y, unsigned long *pixels, unsigned long syncBits, void *arg)
+	//LOWER LIMIT: THE CODE BETWEEN THESE MARKS IS SHARED BETWEEN 3BIT, 6BIT, AND 14BIT
+
+void IRAM_ATTR VGA3BitI::interruptPixelLine(int y, uint8_t *pixels, void *arg)
 {
 	VGA3BitI * staticthis = (VGA3BitI *)arg;
+	unsigned long syncBits = (staticthis->hsyncBitI | staticthis->vsyncBitI) * staticthis->rendererStaticReplicate32mask;
 	unsigned char *line = staticthis->frontBuffer[y];
 	int j = 0;
 	for (int i = 0; i < staticthis->mode.hRes / 4; i++)
@@ -143,6 +176,6 @@ void IRAM_ATTR VGA3BitI::interruptPixelLine(int y, unsigned long *pixels, unsign
 		int p1 = (line[j++] >> 4) & 7;
 		int p2 = (line[j] >> 0) & 7;
 		int p3 = (line[j++] >> 4) & 7;
-		pixels[i] = syncBits | (p2 << 0) | (p3 << 8) | (p0 << 16) | (p1 << 24);
+		((uint32_t *)pixels)[i] = syncBits | (p2 << 0) | (p3 << 8) | (p0 << 16) | (p1 << 24);
 	}
 }

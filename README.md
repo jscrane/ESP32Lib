@@ -8,6 +8,8 @@ Patreon https://patreon.com/bitluni
 Paypal https://paypal.me/bitluni
 
 # Acknowledgements
+Great thanks to Martin Laclaustra for Version 0.4.0 that was refactored by in the development branch
+unifing even more features for this library.
 Thanks to Ivan Grokhotkov & Jeroen Domburg (aka Sprite_tm) for their great work on I2S revealing some nitty-gritty details and quirks of the ESP32.
 Special thanks to Fabrizio Di Vittorio for the inpiration to look deeper into 8Bit modes enabling higher resolutions. He developed the FabGL library simultaneously.
 
