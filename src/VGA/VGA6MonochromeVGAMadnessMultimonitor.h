@@ -24,6 +24,7 @@
 //#include "soc/i2s_reg.h"
 //#include "soc/i2s_struct.h"
 //#include "soc/io_mux_reg.h"
+#include "soc/gpio_periph.h"
 #include "driver/gpio.h"
 
 
@@ -119,12 +120,12 @@ class VGA6MonochromeVGAMadnessMultimonitor : public VGAI2SOverlapping< BLpx1sz8s
 				gpio_set_direction((gpio_num_t)pinOutputMap[i], (gpio_mode_t)GPIO_MODE_DEF_OUTPUT);
 				//rtc_gpio_set_drive_capability((gpio_num_t)pinMap[i], (gpio_drive_cap_t)GPIO_DRIVE_CAP_3 );
 				//signal_idx == 0x100, cancel output put to the gpio
-				gpio_matrix_out(pinOutputMap[i], 0x100, false, false);
-				if ((frontGlobalColor[i % 6]>>(i/6))&1) gpio_matrix_out(pinOutputMap[i], deviceBaseIndex[1] + (i % 6), false, false);
+				esp_rom_gpio_connect_out_signal(pinOutputMap[i], 0x100, false, false);
+				if ((frontGlobalColor[i % 6]>>(i/6))&1) esp_rom_gpio_connect_out_signal(pinOutputMap[i], deviceBaseIndex[1] + (i % 6), false, false);
 				//modify background only if it is compatible with front color:
 				//components of... (background MUST be in foreground) AND (foreground MUST SURPASS background)
 				if ( ((backGlobalColor[i % 6] & frontGlobalColor[i % 6]) == backGlobalColor[i % 6]) && ( (frontGlobalColor[i % 6] & ((backGlobalColor[i % 6] & frontGlobalColor[i % 6])^0b00000111))>0) )
-					if ((backGlobalColor[i % 6]>>(i/6))&1) gpio_matrix_out(pinOutputMap[i], deviceBaseIndex[1] + (8*bytesPerBufferUnit()-2), (mode.hSyncPolarity==1)?false:true, false);
+					if ((backGlobalColor[i % 6]>>(i/6))&1) esp_rom_gpio_connect_out_signal(pinOutputMap[i], deviceBaseIndex[1] + (8*bytesPerBufferUnit()-2), (mode.hSyncPolarity==1)?false:true, false);
 			}
 		startTX();
 		return true;
