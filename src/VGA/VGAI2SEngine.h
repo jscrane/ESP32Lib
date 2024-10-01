@@ -12,24 +12,22 @@
 #pragma once
 
 #include "VGA.h"
+#include "../I2S/I2S.h"
 
 #include "../Tools/Log.h"
 
 template<class BufferLayout>
-class VGAI2SEngine : public VGA, public BufferLayout
+class VGAI2SEngine : public I2S, public VGA, public BufferLayout
 {
   public:
 	VGAI2SEngine(const int i2sIndex = 0)
-	: VGA(i2sIndex)
+	: I2S(i2sIndex)
 	{
+		dmaBufferDescriptors = 0; // I2S member variable
 		lineBufferCount = 1;
-		dmaBufferDescriptors = 0;
 		rendererBufferCount = 1;
 		rendererStaticReplicate32mask = rendererStaticReplicate32();
 	}
-
-	//stump to fullfil requirement implementation from parent VGA class
-	virtual int bytesPerSample() const { return 0; }
 
 	virtual bool initenginePreparation(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin = -1, int descriptorsPerLine = 2)
 	{
@@ -58,9 +56,35 @@ class VGAI2SEngine : public VGA, public BufferLayout
 		return true;
 	}
 
+
+	// Templated definitions and functions to pass to children (might this work with alias or using?)
+
 	typedef typename BufferLayout::BufferUnit BufferRendererUnit;
 
-	//pass templated functions
+	static int bytesPerBufferUnit()
+	{
+		return sizeof(BufferRendererUnit);
+	}
+	static int samplesPerBufferUnit()
+	{
+		return BufferLayout::static_xpixperunit();
+	}
+	static int renderer_xpixperunit()
+	{
+		return BufferLayout::static_xpixperunit();
+	}
+	static int renderer_ypixperunit()
+	{
+		return BufferLayout::static_ypixperunit();
+	}
+	static int renderer_replicate()
+	{
+		return BufferLayout::static_replicate();
+	}
+	static int rendererStaticReplicate32() // TODO Refactor to renderer_replicate32()
+	{
+		return BufferLayout::static_replicate32();
+	}
 	static int renderer_swx(int x)
 	{
 		return BufferLayout::static_swx(x);
@@ -79,6 +103,35 @@ class VGAI2SEngine : public VGA, public BufferLayout
 	}
 
 
+	// Functions related with sync bits
+
+	virtual const int bitMaskInRenderingBufferHSync()
+	{
+		return 1<<(8*this->bytesPerBufferUnit()-2);
+	}
+
+	virtual const int bitMaskInRenderingBufferVSync()
+	{
+		return 1<<(8*this->bytesPerBufferUnit()-1);
+	}
+
+	virtual void initSyncBits()
+	{
+		this->hsyncBitI = this->mode.hSyncPolarity ? (this->bitMaskInRenderingBufferHSync()) : 0;
+		this->vsyncBitI = this->mode.vSyncPolarity ? (this->bitMaskInRenderingBufferVSync()) : 0;
+		this->hsyncBit = this->hsyncBitI ^ (this->bitMaskInRenderingBufferHSync());
+		this->vsyncBit = this->vsyncBitI ^ (this->bitMaskInRenderingBufferVSync());
+	}
+
+	virtual long syncBits(bool hSync, bool vSync)
+	{
+		return ((hSync ? this->hsyncBit : this->hsyncBitI) | (vSync ? this->vsyncBit : this->vsyncBitI)) * this->rendererStaticReplicate32();
+	}
+
+
+	// Member variables specific to this engine
+
+	int lineBufferCount;
 	int rendererBufferCount;
 	int indexRendererDataBuffer[3];
 	int indexHingeDataBuffer; // last fixed buffer that "jumps" to the active data buffer
@@ -90,17 +143,12 @@ class VGAI2SEngine : public VGA, public BufferLayout
 
 	int rendererStaticReplicate32mask = 0;
 
-	static int bytesPerBufferUnit()
+
+	// Functions specific to this engine
+
+	void setLineBufferCount(int lineBufferCount)
 	{
-		return sizeof(BufferRendererUnit);
-	}
-	static int samplesPerBufferUnit()
-	{
-		return BufferLayout::static_xpixperunit();
-	}
-	static int rendererStaticReplicate32()
-	{
-		return BufferLayout::static_replicate32();
+		this->lineBufferCount = lineBufferCount;
 	}
 
 	BufferRendererUnit * getBufferDescriptor(int y, int bufferIndex = 0)

@@ -110,7 +110,7 @@ class Mesh
 		}
 	}
 
-	void drawVertices(Graphics &g, Color color = -1)
+	void drawVertices(Graphics &g, Color color)
 	{
 		for (int i = 0; i < vertexCount; i++)
 			g.dot(tvertices[i][0], tvertices[i][1], color);

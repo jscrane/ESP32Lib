@@ -32,7 +32,7 @@ class BLpx6sz8swmx2yshmxy
 
 	static const int static_ypixperunit()
 	{
-		return 8;
+		return mx*my;
 	}
 
 	static const int static_bufferdatamask()

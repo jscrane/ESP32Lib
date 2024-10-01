@@ -1,5 +1,5 @@
 /*
-	Author: Martin-Laclaustra 2020
+	Author: Martin-Laclaustra 2021
 	License: 
 	Creative Commons Attribution ShareAlike 4.0
 	https://creativecommons.org/licenses/by-sa/4.0/
@@ -29,23 +29,28 @@
 	  depending on the monochrome color of choice
 */
 #pragma once
-#include "VGAI2SOverlapping.h"
+#include "VGAI2SDynamic.h"
 //#include "../Graphics/Graphics.h"
-#include "../Graphics/GraphicsX6S2W8RangedSwapped.h"
+#include "../Graphics/GraphicsW8.h"
 
 
-class VGA8BitDAC : public VGAI2SOverlapping< BLpx1sz16sw1sh0, GraphicsX6S2W8RangedSwapped > // GraphicsX6S2W8RangedSwapped (=) Graphics<ColorW8, BLpx1sz16sw1sh8, CTBRange>
+class VGA8BitDACI : public VGAI2SDynamic< BLpx1sz16sw1sh0, GraphicsW8 > // GraphicsW8 (=) Graphics<ColorW8, BLpx1sz8sw0sh0, CTBIdentity>
 {
   public:
-	VGA8BitDAC() //DAC based modes only work with I2S0
-		: VGAI2SOverlapping< BLpx1sz16sw1sh0, GraphicsX6S2W8RangedSwapped >(0)
+	VGA8BitDACI() //DAC based modes only work with I2S0
+		: VGAI2SDynamic< BLpx1sz16sw1sh0, GraphicsW8 >(0)
 	{
 		frontColor = 0xff;
 		colorMaxValue = 54;
+		interruptStaticChild = &VGA8BitDACI::interrupt;
 	}
 
 	int outputPin = 25;
 	bool voltageDivider = false;
+
+	int colorDepthConversionFactor = 1;
+	int colorMaxValue = 255;
+	int colorMinValue = 0;
 
 	bool init(const Mode &mode, const int hsyncPin, const int vsyncPin, const int outputPin = 25, const bool voltageDivider = false)
 	{
@@ -69,7 +74,7 @@ class VGA8BitDAC : public VGAI2SOverlapping< BLpx1sz16sw1sh0, GraphicsX6S2W8Rang
 		//colorDepthConversionFactor = (colorMaxValue - colorMinValue + 1)/256;
 		colorDepthConversionFactor = colorMaxValue - colorMinValue + 1;
 
-		return initoverlappingbuffers(mode, pinMap, bitCount, clockPin);
+		return initdynamicwritetorenderbuffer(mode, pinMap, bitCount, clockPin);
 	}
 
 	bool init(const Mode &mode, const int *redPins, const int *greenPins, const int *bluePins, const int hsyncPin, const int vsyncPin, const int clockPin = -1, const bool mostSignigicantPinFirst = false)
@@ -86,7 +91,7 @@ class VGA8BitDAC : public VGAI2SOverlapping< BLpx1sz16sw1sh0, GraphicsX6S2W8Rang
 		pinMap[7] = this->vsyncPin;
 		colorDepthConversionFactor = colorMaxValue - colorMinValue + 1;
 
-		return initoverlappingbuffers(mode, pinMap, bitCount, clockPin);
+		return initdynamicwritetorenderbuffer(mode, pinMap, bitCount, clockPin);
 	}
 
 	bool init(const Mode &mode, const PinConfig &pinConfig)
@@ -105,7 +110,7 @@ class VGA8BitDAC : public VGAI2SOverlapping< BLpx1sz16sw1sh0, GraphicsX6S2W8Rang
 		pinMap[7] = this->vsyncPin;
 		colorDepthConversionFactor = colorMaxValue - colorMinValue + 1;
 
-		return initoverlappingbuffers(mode, pinMap, bitCount, clockPin);
+		return initdynamicwritetorenderbuffer(mode, pinMap, bitCount, clockPin);
 	}
 
 	bool initengine(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin = -1, int descriptorsPerLine = 2)
@@ -129,4 +134,9 @@ class VGA8BitDAC : public VGAI2SOverlapping< BLpx1sz16sw1sh0, GraphicsX6S2W8Rang
 	{
 		return 1<<(8*this->bytesPerBufferUnit()-1-8);
 	}
+
+  protected:
+	static void interrupt(void *arg);
+
+	static void interruptPixelLine(int y, uint8_t *pixels, void *arg);
 };

@@ -10,15 +10,15 @@
 		http://bitluni.net
 */
 #pragma once
-#include "VGAI2SEngine.h"
+#include "VGAI2SOverlapping.h"
 #include "../Graphics/Graphics.h"
 #include "../Graphics/BufferLayouts/BLpx4sz16swmx1yshmxy.h"
 
-class VGA4ColorMultimonitor : public VGAI2SEngine<BLpx1sz16sw1sh0>, public Graphics<ColorR1G1B1A1X4, BLpx4sz16swmx1yshmxy, CTBIdentity>
+class VGA4ColorMultimonitor : public VGAI2SOverlapping<BLpx1sz16sw1sh0, Graphics<ColorR1G1B1A1X4, BLpx4sz16swmx1yshmxy, CTBIdentity> >
 {
   public:
 	VGA4ColorMultimonitor(const int i2sIndex = 1)
-		: VGAI2SEngine<BLpx1sz16sw1sh0>(i2sIndex)
+		: VGAI2SOverlapping<BLpx1sz16sw1sh0, Graphics<ColorR1G1B1A1X4, BLpx4sz16swmx1yshmxy, CTBIdentity> >(i2sIndex)
 	{
 		frontColor = 0xf;
 	}
@@ -64,16 +64,17 @@ class VGA4ColorMultimonitor : public VGAI2SEngine<BLpx1sz16sw1sh0>, public Graph
 		return initoverlappingbuffers(mode, pinMap, bitCount, clockPin);
 	}
 
-	bool initMulti(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin, int descriptorsPerLine = 2)
+	bool initenginePreparation(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin, int descriptorsPerLine = 2)
+	override
 	{
 		this->mode = mode;
-		int xres = mx * mode.hRes;
-		int yres = my * mode.vRes / mode.vDiv;
-		wx = mode.hRes;
-		wy = mode.vRes / mode.vDiv;
+		int xres = mx * mode.hRes; // This line changes from VGAI2SEngine
+		int yres = my * mode.vRes / mode.vDiv; // This line changes from VGAI2SEngine
+		wx = mode.hRes; // This line is added to VGAI2SEngine
+		wy = mode.vRes / mode.vDiv; // This line is added to VGAI2SEngine
 		initSyncBits();
-		this->vsyncPin = vsyncPin;
-		this->hsyncPin = hsyncPin;
+		this->vsyncPin = pinMap[8*bytesPerBufferUnit()-1];
+		this->hsyncPin = pinMap[8*bytesPerBufferUnit()-2];
 		totalLines = mode.linesPerField();
 		if(descriptorsPerLine < 1 || descriptorsPerLine > 2) ERROR("Wrong number of descriptors per line");
 		if(descriptorsPerLine == 1) allocateRendererBuffers1DescriptorsPerLine();
@@ -82,95 +83,32 @@ class VGA4ColorMultimonitor : public VGAI2SEngine<BLpx1sz16sw1sh0>, public Graph
 		//allocateLineBuffers();
 		currentLine = 0;
 		vSyncPassed = false;
-		initParallelOutputMode(pinMap, mode.pixelClock, bitCount, clockPin);
-		startTX();
 		return true;
 	}
 
-
-	//THE REST OF THE FILE IS SHARED CODE BETWEEN 3BIT, 6BIT, AND 14BIT
-
-	static const int bitMaskInRenderingBufferHSync()
-	{
-		return 1<<(8*bytesPerBufferUnit()-2);
-	}
-
-	static const int bitMaskInRenderingBufferVSync()
-	{
-		return 1<<(8*bytesPerBufferUnit()-1);
-	}
-
-	bool initoverlappingbuffers(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin = -1)
-	{
-		lineBufferCount = mode.vRes / mode.vDiv; // yres
-		rendererBufferCount = frameBufferCount;
-		return initMulti(mode, pinMap, bitCount, clockPin, 2); // 2 buffers per line
-	}
-
-	virtual void initSyncBits()
-	{
-		hsyncBitI = mode.hSyncPolarity ? (bitMaskInRenderingBufferHSync()) : 0;
-		vsyncBitI = mode.vSyncPolarity ? (bitMaskInRenderingBufferVSync()) : 0;
-		hsyncBit = hsyncBitI ^ (bitMaskInRenderingBufferHSync());
-		vsyncBit = vsyncBitI ^ (bitMaskInRenderingBufferVSync());
-	}
-
-	virtual long syncBits(bool hSync, bool vSync)
-	{
-		return ((hSync ? hsyncBit : hsyncBitI) | (vSync ? vsyncBit : vsyncBitI)) * rendererStaticReplicate32();
-	}
-
-	virtual void propagateResolution(const int xres, const int yres)
-	{
-		setResolution(xres, yres);
-	}
-
-	int currentBufferToAssign = 0;
-
-	virtual BufferGraphicsUnit **allocateFrameBuffer()
-	{
-		void **arr = (void **)malloc(yres * sizeof(void *));
-		if(!arr)
-			ERROR("Not enough memory");
-		for (int y = 0; y < yres; y++)
-		{
-			arr[y] = (void *)getBufferDescriptor(graphics_swy(y), currentBufferToAssign);
-		}
-		currentBufferToAssign++;
-		return (BufferGraphicsUnit **)arr;
-	}
-
-	virtual void show(bool vSync = false)
-	{
-		if (!frameBufferCount)
-			return;
-
-		Graphics::show(vSync);
-		switchToRendererBuffer(currentFrameBuffer);
-		// wait at least one frame
-		// else the switch does not take place for the display
-		// until the frame is completed
-		// and drawing starts in the backbuffer while still shown
-		if (frameBufferCount == 2) // in triple buffer or single buffer this is not an issue
-		{
-			uint32_t timemark = micros();
-			uint32_t framedurationinus = (uint64_t)mode.pixelsPerLine() * (uint64_t)mode.linesPerField() * (uint64_t)1000000 / (uint64_t)mode.pixelClock;
-			while((micros() - timemark) < framedurationinus){delay(0);}
-		}
-	}
-
-	virtual void scroll(int dy, Color color)
+	void scroll(int dy, Color color)
+	override
 	{
 		Graphics::scroll(dy, color);
-		if(dmaBufferDescriptors)
-			for (int i = 0; i < yres * mode.vDiv / my; i++)
-				dmaBufferDescriptors[
-						indexRendererDataBuffer[(currentFrameBuffer + frameBufferCount - 1) % frameBufferCount]
-						 + i * descriptorsPerLine + descriptorsPerLine - 1
+		if(this->dmaBufferDescriptors)
+			for (int i = 0; i < this->yres * this->mode.vDiv / this->my; i++)
+				this->dmaBufferDescriptors[
+						this->indexRendererDataBuffer[(this->currentFrameBuffer + this->frameBufferCount - 1) % this->frameBufferCount]
+						 + i * this->descriptorsPerLine + this->descriptorsPerLine - 1
 					].setBuffer(
-							((uint8_t *) backBuffer[i / mode.vDiv]) - dataOffsetInLineInBytes
+							((uint8_t *) this->backBuffer[i / this->mode.vDiv]) - this->dataOffsetInLineInBytes
 							,
-							((descriptorsPerLine > 1)?mode.hRes:mode.pixelsPerLine()) * bytesPerBufferUnit()/samplesPerBufferUnit()
+							((this->descriptorsPerLine > 1)?this->mode.hRes:this->mode.pixelsPerLine()) * this->bytesPerBufferUnit()/this->samplesPerBufferUnit()
 						);
+	}
+
+	void clear(Color color = 0)
+	override
+	{
+		BufferGraphicsUnit bufferUnaffectedBits = (backBuffer[0][0])&( vsyncBit | hsyncBit | vsyncBitI | hsyncBitI );
+		BufferGraphicsUnit newColor = (BufferGraphicsUnit)( graphics_coltobuf(color & static_colormask(), 0, 0)*((0b001001001001) & (~( vsyncBit | hsyncBit | vsyncBitI | hsyncBitI ))) | bufferUnaffectedBits );
+		for (int y = 0; y < this->wy; y++)
+			for (int x = 0; x < this->wx; x++)
+				backBuffer[y][x] = newColor;
 	}
 };
