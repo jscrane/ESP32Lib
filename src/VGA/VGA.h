@@ -33,7 +33,7 @@ class VGA : public VGAMode, public VGAPinConfig
 
 	// TODO This function should be pure virtual, but it is currently implemented with added arguments in children classes
 	virtual bool init(const Mode &mode, const int *pinMap, const int bitCount, const int clockPin = -1)
-	{}
+	{ return false; }
 
 	virtual bool init(const Mode &mode, const PinConfig &pinConfig) = 0;
 
