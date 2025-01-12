@@ -105,7 +105,7 @@ class DMABufferDescriptor : protected lldesc_t
 		if (!b)
 			DEBUG_PRINTLN("Failed to alloc DMABufferDescriptor");
 		b->init();
-		if (allocateBuffer)
+		if (allocBuffer)
 			b->setBuffer(allocateBuffer(bytes, clear, clearValue), bytes);
 		return b;
 	}
